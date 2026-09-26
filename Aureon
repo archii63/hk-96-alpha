@@ -1,0 +1,96 @@
+"""
+Aureon
+Secure Configuration Manager
+
+A lightweight configuration validator for Python applications.
+It helps detect missing, empty, and weak environment variables
+without exposing sensitive values in logs.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from dataclasses import dataclass
+from typing import Iterable
+
+
+@dataclass(frozen=True)
+class ConfigRule:
+    name: str
+    required: bool = True
+    min_length: int = 1
+
+
+class ConfigurationError(Exception):
+    """Raised when application configuration is invalid."""
+
+
+class ConfigManager:
+    """Validate environment configuration without exposing secrets."""
+
+    def __init__(self, rules: Iterable[ConfigRule]):
+        self.rules = tuple(rules)
+
+    def validate(self) -> dict[str, str]:
+        errors: dict[str, str] = {}
+
+        for rule in self.rules:
+            value = os.getenv(rule.name)
+
+            if rule.required and not value:
+                errors[rule.name] = "missing required value"
+                continue
+
+            if value is not None and len(value) < rule.min_length:
+                errors[rule.name] = (
+                    f"value must contain at least {rule.min_length} characters"
+                )
+
+        return errors
+
+    def get(self, name: str, default: str | None = None) -> str | None:
+        return os.getenv(name, default)
+
+
+def mask(value: str | None) -> str:
+    """Return a safe representation of a sensitive value."""
+    if not value:
+        return "<empty>"
+
+    if len(value) <= 4:
+        return "****"
+
+    return f"{value[:2]}{'*' * (len(value) - 4)}{value[-2:]}"
+
+
+def main() -> int:
+    rules = [
+        ConfigRule("APP_ENV", min_length=3),
+        ConfigRule("DATABASE_URL", min_length=10),
+        ConfigRule("API_KEY", min_length=16),
+    ]
+
+    config = ConfigManager(rules)
+    errors = config.validate()
+
+    if errors:
+        print("Configuration validation failed:\n")
+
+        for name, reason in errors.items():
+            print(f"  - {name}: {reason}")
+
+        return 1
+
+    print("Configuration validation passed.")
+
+    # Safe diagnostic output: secrets are never printed directly.
+    for name in ("APP_ENV", "DATABASE_URL", "API_KEY"):
+        value = config.get(name)
+        print(f"  {name}: {mask(value)}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
